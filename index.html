@@ -620,8 +620,7 @@ async function atualizar(){
   btn.textContent = "Buscando no Meta…";
   aviso("Lendo as contas no Meta. Leva uns 20 segundos.");
   try {
-    const r = await rpc("atualizar_agora");
-    const j = await r.json();
+    const j = await rpc("atualizar_agora");
     if (j && j.ok === false){
       aviso(`Os dados já foram atualizados há pouco. Tente de novo em ${j.espere}s.`, "erro");
       btn.disabled = false; btn.textContent = antes;
