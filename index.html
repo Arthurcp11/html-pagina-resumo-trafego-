@@ -1,0 +1,643 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<title>Pulso Diário de Tráfego</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: totais no topo, grade de contas ordenada por severidade, fila de alertas, depois um bloco por conta. */
+:root{
+  --bg:#fbfbfa;
+  --surface:#ffffff;
+  --surface-2:#f4f2f0;
+  --line:#e2ded9;
+  --fg:#1c1b19;
+  --muted:#6f6a64;
+  --accent:#f26522;
+  --ok:#0f7a55;
+  --warn:#b36b00;
+  --crit:#c23b2e;
+  --ok-bg:#e6f3ed;
+  --warn-bg:#fbf0dd;
+  --crit-bg:#fbe9e6;
+  --font-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --font-body:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#131416;--surface:#1c1e21;--surface-2:#25282c;--line:#32363b;
+    --fg:#eceae7;--muted:#9a968f;--accent:#ff7b3d;
+    --ok:#4cc192;--warn:#e0a53f;--crit:#f0756a;
+    --ok-bg:#15302a;--warn-bg:#332a16;--crit-bg:#3a1f1d;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131416;--surface:#1c1e21;--surface-2:#25282c;--line:#32363b;
+  --fg:#eceae7;--muted:#9a968f;--accent:#ff7b3d;
+  --ok:#4cc192;--warn:#e0a53f;--crit:#f0756a;
+  --ok-bg:#15302a;--warn-bg:#332a16;--crit-bg:#3a1f1d;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{
+  max-width:1900px;margin:0 auto;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:28px 56px;display:flex;flex-direction:column;gap:34px;
+}
+h1,h2,h3{text-wrap:balance;margin:0;font-family:var(--font-display)}
+
+.head{display:flex;flex-direction:column;gap:14px}
+.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:600}
+.head h1{font-size:clamp(26px,5vw,36px);font-weight:700;letter-spacing:-.02em;line-height:1.1}
+.head .sub{color:var(--muted);font-size:14px;max-width:66ch}
+.acoes{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.btn{
+  font-family:var(--font-body);font-size:13.5px;font-weight:600;
+  padding:8px 16px;border-radius:8px;cursor:pointer;
+  background:var(--accent);color:#fff;border:1px solid transparent;
+  transition:opacity .12s ease;
+}
+.btn:hover{opacity:.88}
+.btn:disabled{opacity:.5;cursor:progress}
+.btn:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.carga{font-size:12.5px;color:var(--muted)}
+.carga.erro{color:var(--crit)}
+@media (prefers-reduced-motion:reduce){.btn{transition:none}}
+
+.totais{display:flex;flex-wrap:wrap;gap:10px 28px;padding-block:14px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.total{display:flex;flex-direction:column;gap:2px;min-width:0}
+.total .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.total .v{font-family:var(--font-mono);font-size:21px;font-weight:600;font-variant-numeric:tabular-nums}
+
+.sec{display:flex;flex-direction:column;gap:14px}
+.sec-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.sec-head h2{font-size:17px;font-weight:600;letter-spacing:-.01em}
+.sec-head .hint{font-size:12px;color:var(--muted)}
+
+.grade{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.card{
+  background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--line);
+  border-radius:10px;padding:13px 15px;display:flex;flex-direction:column;gap:7px;min-width:0;
+}
+.card.ok{border-left-color:var(--ok)}
+.card.warn{border-left-color:var(--warn)}
+.card.crit{border-left-color:var(--crit)}
+.card .nome{font-weight:600;font-size:14px;overflow-wrap:anywhere;line-height:1.3}
+.card .bloco-cpr{display:flex;flex-direction:column;gap:1px;padding-bottom:3px}
+.card .cpr{font-family:var(--font-mono);font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.15}
+.card .un{font-size:10px;color:var(--muted);letter-spacing:.09em;text-transform:uppercase;font-weight:600}
+.card .conv{font-size:11.5px;color:var(--muted);line-height:1.3}
+.cell-un{display:block;font-size:10px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase;font-family:var(--font-body)}
+.linha{display:flex;justify-content:space-between;gap:10px;font-size:12.5px}
+.linha .k{color:var(--muted)}
+.linha .v{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.delta{font-family:var(--font-mono);font-weight:600;font-variant-numeric:tabular-nums}
+.delta.ok{color:var(--ok)}.delta.warn{color:var(--warn)}.delta.crit{color:var(--crit)}
+
+/* faixa de cobrança: fica acima dos avisos e abre a seção */
+.billing{
+  display:flex;gap:13px;align-items:flex-start;
+  padding:14px 16px;border-radius:10px;margin-bottom:14px;
+  border:1px solid var(--line);background:var(--surface);
+}
+.billing.parado{background:var(--crit);border-color:transparent;color:#fff}
+.billing.risco{background:var(--warn-bg);border-color:transparent}
+.billing .sinal{
+  flex:none;width:10px;height:10px;border-radius:50%;margin-top:6px;
+  background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb, var(--ok) 22%, transparent);
+}
+.billing.parado .sinal{background:#fff;box-shadow:0 0 0 4px rgba(255,255,255,.3)}
+.billing.risco .sinal{background:var(--warn);box-shadow:0 0 0 4px color-mix(in srgb, var(--warn) 25%, transparent)}
+.billing .corpo{min-width:0;display:flex;flex-direction:column;gap:6px}
+.billing .t{font-weight:600;font-size:14.5px;line-height:1.35}
+.billing.parado .t{font-size:15.5px}
+.billing .d{font-size:13px;color:var(--muted)}
+.billing.parado .d{color:rgba(255,255,255,.85)}
+.billing ul{margin:2px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:3px;font-size:13.5px}
+.billing li{overflow-wrap:anywhere}
+.billing li b{font-weight:600}
+:root[data-theme="dark"] .billing.risco .d{color:var(--fg);opacity:.75}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]) .billing.risco .d{color:var(--fg);opacity:.75}
+}
+
+/* parcial do dia: números provisórios, por isso tipografia mais leve que a da semana fechada */
+.hoje-box{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.hoje-topo{display:flex;flex-wrap:wrap;gap:10px 26px;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.hoje-topo .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:block}
+.hoje-topo .v{font-family:var(--font-mono);font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+.hoje-vazio{padding:22px 16px;display:flex;flex-direction:column;gap:5px}
+.hoje-vazio .t{font-weight:600;font-size:14.5px}
+.hoje-vazio .d{font-size:13px;color:var(--muted);max-width:60ch}
+.hoje-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1px;background:var(--line)}
+.hoje-cel{background:var(--surface);padding:12px 15px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.hoje-cel .n{font-size:13px;font-weight:600;overflow-wrap:anywhere;line-height:1.3}
+.hoje-cel .g{font-family:var(--font-mono);font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
+.hoje-cel .r{font-size:12px;color:var(--muted)}
+.hoje-cel.zerada .g{color:var(--muted)}
+.hoje-cel .marca{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--crit);font-weight:700}
+
+.alertas{display:flex;flex-direction:column;gap:8px}
+.alerta{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);min-width:0}
+.alerta.crit{background:var(--crit-bg);border-color:transparent}
+.alerta.warn{background:var(--warn-bg);border-color:transparent}
+.alerta.ok{background:var(--ok-bg);border-color:transparent}
+.pill{flex:none;font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;padding:3px 8px;border-radius:999px;margin-top:2px}
+.pill.crit{background:var(--crit);color:#fff}
+.pill.warn{background:var(--warn);color:#fff}
+.pill.ok{background:var(--ok);color:#fff}
+.alerta .t{font-weight:600;font-size:14px;overflow-wrap:anywhere}
+.alerta .d{font-size:13px;color:var(--muted);margin-top:2px}
+.alerta .txt{min-width:0}
+:root[data-theme="dark"] .alerta.crit .d,:root[data-theme="dark"] .alerta.warn .d,:root[data-theme="dark"] .alerta.ok .d{color:var(--fg);opacity:.75}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]) .alerta.crit .d,
+  :root:not([data-theme="light"]) .alerta.warn .d,
+  :root:not([data-theme="light"]) .alerta.ok .d{color:var(--fg);opacity:.75}
+}
+
+.conta{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.conta-head{padding:14px 16px;display:flex;flex-wrap:wrap;gap:10px 20px;align-items:baseline;justify-content:space-between;border-bottom:1px solid var(--line)}
+.conta-head h3{font-size:17px;font-weight:700;letter-spacing:-.01em;overflow-wrap:anywhere}
+.conta-head .meta{font-size:11.5px;color:var(--muted);font-family:var(--font-mono)}
+.kpis{display:flex;flex-wrap:wrap;gap:8px 20px}
+.kpi{display:flex;flex-direction:column;gap:1px}
+.kpi .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.kpi .v{font-family:var(--font-mono);font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+
+.spark-wrap{position:relative;padding:14px 16px;display:flex;flex-direction:column;gap:6px;border-bottom:1px solid var(--line)}
+.spark-label{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.spark-label .t{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.spark-label .r{font-size:11.5px;color:var(--muted)}
+svg.spark{display:block;width:100%;height:auto;max-width:100%;touch-action:pan-y}
+svg.spark .hit{fill:transparent;cursor:pointer;outline:none}
+svg.spark .hit:focus-visible{fill:var(--accent);fill-opacity:.1}
+svg.spark .bar{transition:fill .12s ease}
+svg.spark .bar.ativa{fill:var(--accent)}
+.tip{
+  position:absolute;z-index:5;pointer-events:none;
+  background:var(--fg);color:var(--bg);border-radius:7px;padding:8px 10px;
+  display:flex;flex-direction:column;gap:2px;font-size:12px;line-height:1.45;white-space:nowrap;
+  box-shadow:0 6px 20px rgba(0,0,0,.22);transform:translateY(-100%);
+}
+.tip b{font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;opacity:.7;font-weight:500}
+.tip span{display:flex;justify-content:space-between;gap:16px}
+.tip em{font-style:normal;font-family:var(--font-mono);font-weight:600;font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){svg.spark .bar{transition:none}}
+
+.tbl-scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;min-width:580px}
+th,td{padding:9px 12px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal;min-width:200px}
+thead th{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line);background:var(--surface-2)}
+tbody td{border-bottom:1px solid var(--line);font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+tbody td:first-child{font-family:var(--font-body)}
+tbody tr:last-child td{border-bottom:none}
+.camp-nome{font-weight:600}
+.camp-obj{font-size:11px;color:var(--muted);font-weight:400;display:block;letter-spacing:.04em;text-transform:uppercase}
+.parada{color:var(--muted)}
+
+.rodape{display:flex;flex-direction:column;gap:12px;padding-top:20px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+.rodape p{margin:0;max-width:95ch}
+
+/* Telas largas: mais colunas e menos altura, para caber tudo numa tela só. */
+@media (min-width:1200px){
+  .head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:10px 48px}
+  .head .eyebrow{grid-column:1}
+  .head h1{grid-column:1}
+  .head .sub{grid-column:1;margin:0}
+  .head .acoes{grid-column:1}
+  .totais{
+    grid-column:2;grid-row:1 / span 4;align-self:center;
+    border:1px solid var(--line);border-radius:12px;padding:16px 22px;
+    display:grid;grid-template-columns:repeat(2,auto);gap:14px 34px;
+  }
+  .grade{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .hoje-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .rodape{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 40px;align-items:start}
+  .rodape .regras{grid-column:1 / -1}
+}
+@media (min-width:1560px){
+  #contas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start}
+  .alertas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;align-items:start}
+  .wrap{gap:38px}
+}
+.rodape strong{color:var(--fg);font-weight:600}
+.regras{display:flex;flex-wrap:wrap;gap:8px}
+.regra{display:flex;align-items:center;gap:7px;padding:5px 11px;border-radius:999px;background:var(--surface-2);font-size:12px}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.crit{background:var(--crit)}
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <div class="eyebrow" id="contagem">Meta Ads</div>
+    <h1>Pulso Diário de Tráfego</h1>
+    <p class="sub">Semana de <strong id="periodo">—</strong> contra a semana anterior, conta por conta. O alerta é relativo: cada conta é medida contra ela mesma, não contra um teto fixo.</p>
+    <div class="acoes">
+      <button class="btn" id="btnAtualizar" type="button">Atualizar dados</button>
+      <span class="carga" id="statusCarga">Carregando…</span>
+    </div>
+    <div class="totais">
+      <div class="total"><span class="k">Investido na semana</span><span class="v" id="tInv7">—</span></div>
+      <div class="total"><span class="k">Investido ontem</span><span class="v" id="tInvDia">—</span></div>
+      <div class="total"><span class="k">Contas em alerta</span><span class="v" id="tAlerta">—</span></div>
+      <div class="total"><span class="k">Candidatas a escala</span><span class="v" id="tEscala">—</span></div>
+    </div>
+  </header>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Hoje até agora</h2><span class="hint" id="hojeQuando">atualizado às 13h e às 18h</span></div>
+    <div id="hoje"></div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Situação por conta</h2><span class="hint">semana fechada, ordenado por severidade</span></div>
+    <div class="grade" id="grade"></div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Avisos</h2><span class="hint">abra por aqui</span></div>
+    <div id="cobranca"></div>
+    <div class="alertas" id="alertas"></div>
+  </section>
+
+  <section class="sec" id="contas"></section>
+
+  <footer class="rodape">
+    <div class="regras">
+      <span class="regra"><span class="dot ok"></span>20% ou mais barato que a semana passada — candidata a escala</span>
+      <span class="regra"><span class="dot warn"></span>20% a 50% mais caro — observar</span>
+      <span class="regra"><span class="dot crit"></span>mais de 50% mais caro — agir</span>
+    </div>
+    <p><strong>Por que semana contra semana.</strong> O Meta só resolve o custo por resultado no nível de campanha, não no da conta, e em conta pequena um único dia tem ruído demais: uma compra a mais ou a menos muda o CPA pela metade. A comparação de sete dias contra sete dias é estável e é a mesma janela de atribuição que o Meta usa.</p>
+    <p><strong>O gráfico é diário.</strong> As barras mostram o investimento de cada dia e a linha, a média móvel de sete dias. Serve para ver se a conta está entregando — conta parada aparece na hora. Quedas de fim de semana são normais e não geram alerta; só gasto zero ou queda acima de 70% é sinalizado.</p>
+    <p><strong>De onde vêm os números.</strong> Um coletor roda sozinho às 9h, às 13h e às 18h: lê as contas direto na API do Meta e grava no banco. O custo por resultado conta apenas as campanhas do objetivo de cada conta — publicações turbinadas e campanhas de alcance entram no investimento, mas não no custo. O botão no topo força uma leitura na hora.</p>
+    <p><strong>Duda Botolli 3</strong> (1021115947596072) continua fora: a conta ainda não foi liberada no conector do Meta. Ela já está cadastrada e entra sozinha quando liberar.</p>
+  </footer>
+
+</div>
+
+<script>
+const SB_URL = "https://stxfkrmoejzrqfhfptap.supabase.co";
+const SB_KEY = "sb_publishable_7O1wiD_xTnZts0wuLK01SA_d3ddy61N";
+const CAB = {apikey: SB_KEY, Authorization: "Bearer " + SB_KEY, "Content-Type": "application/json"};
+function rpc(n){ return fetch(SB_URL + "/rest/v1/rpc/" + n, {method:"POST", headers:CAB, body:"{}"}).then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); }); }
+// Os dados chegam embutidos pela função que serve esta página: nada de busca no navegador.
+let CONTAS = [], DATAS = [], HOJE = null, JANELA = {inicio:"", fim:""};
+
+const ESTADOS = {
+  UNSETTLED:          {g:"parado", txt:"fatura em aberto — o Meta suspendeu a entrega"},
+  DISABLED:           {g:"parado", txt:"conta desativada pelo Meta"},
+  PENDING_CLOSURE:    {g:"parado", txt:"conta em processo de encerramento"},
+  PENDING_SETTLEMENT: {g:"parado", txt:"fatura vencida aguardando liquidação"},
+  IN_GRACE_PERIOD:    {g:"risco",  txt:"pagamento pendente — a conta para quando o prazo vencer"},
+  PENDING_RISK_REVIEW:{g:"risco",  txt:"conta em análise de risco pelo Meta"},
+  ERRO_LEITURA:       {g:"risco",  txt:"não foi possível ler o estado da conta"},
+  ACTIVE:             {g:"ok",     txt:"ativa"}
+};
+
+const brl  = v => v == null ? "—" : "R$ " + Number(v).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+const brl0 = v => v == null ? "—" : "R$ " + Number(v).toLocaleString("pt-BR",{minimumFractionDigits:0,maximumFractionDigits:0});
+const pct  = v => (v > 0 ? "+" : "") + v.toLocaleString("pt-BR",{maximumFractionDigits:0}) + "%";
+const num  = v => Number(v || 0).toLocaleString("pt-BR");
+
+function nivel(delta){
+  if (delta == null) return "neutro";
+  if (delta <= -20) return "ok";
+  if (delta > 50) return "crit";
+  if (delta > 20) return "warn";
+  return "neutro";
+}
+const ordem = {crit:0, warn:1, neutro:2, ok:3};
+
+function calcula(c){
+  const ga = Number(c.atual.gasto), ra = Number(c.atual.res);
+  const gb = Number(c.ant.gasto),   rb = Number(c.ant.res);
+  const cprAtual = ra > 0 ? ga / ra : null;
+  const cprAnt   = rb > 0 ? gb / rb : null;
+  const delta = (cprAtual != null && cprAnt != null) ? ((cprAtual - cprAnt) / cprAnt) * 100 : null;
+  const dias = c.dias.map(Number);
+  const inv7 = dias.slice(-7).reduce((s,v) => s + v, 0);
+  const invDia = dias[dias.length - 1] ?? 0;
+  const baseDia = dias.slice(-8,-1).reduce((s,v) => s + v, 0) / 7;
+  const quedaEntrega = baseDia > 0 ? ((invDia - baseDia) / baseDia) * 100 : null;
+  return {cprAtual, cprAnt, delta, nivel:nivel(delta), inv7, invDia, baseDia, quedaEntrega, gastoAtual:ga, resAtual:ra};
+}
+
+// Barras de investimento diário com a média móvel de 7 dias por cima.
+function sparkline(c){
+  const dias = c.dias.map(Number);
+  const n = dias.length;
+  const W = 720, H = 140, padL = 52, padR = 16, padT = 14, padB = 24;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const maxG = Math.max(...dias, 1);
+  const bw = iw / n;
+
+  let s = `<svg class="spark" viewBox="0 0 ${W} ${H}" role="group" aria-label="Investimento diário de ${c.nome} nos últimos ${n} dias">`;
+
+  for (let i = 0; i <= 2; i++){
+    const y = padT + ih - (ih * i / 2);
+    s += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
+    s += `<text x="${padL-7}" y="${y+4}" text-anchor="end" font-size="10" font-family="var(--font-mono)" fill="var(--muted)">${brl0(maxG*i/2)}</text>`;
+  }
+
+  dias.forEach((g,i) => {
+    const h = (g / maxG) * ih;
+    const x = padL + i*bw + bw*0.18;
+    const ult = i === n-1;
+    s += `<rect class="bar" data-i="${i}" x="${x.toFixed(1)}" y="${(padT+ih-h).toFixed(1)}" width="${(bw*0.64).toFixed(1)}" height="${Math.max(h,0).toFixed(1)}" rx="2" fill="${ult?'var(--accent)':'var(--surface-2)'}" stroke="${ult?'none':'var(--line)'}" stroke-width="1"/>`;
+  });
+
+  const pts = [];
+  for (let i = 6; i < n; i++){
+    const m = dias.slice(i-6, i+1).reduce((a,b) => a+b, 0) / 7;
+    pts.push([padL + i*bw + bw/2, padT + ih - (m/maxG)*ih]);
+  }
+  if (pts.length > 1){
+    s += `<polyline fill="none" stroke="var(--fg)" stroke-opacity="0.5" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="4 3" points="${pts.map(p => p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ")}"/>`;
+  }
+
+  DATAS.forEach((d,i) => {
+    if (i % 3 !== 0 && i !== n-1) return;
+    s += `<text x="${(padL + i*bw + bw/2).toFixed(1)}" y="${H-7}" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--muted)">${d}</text>`;
+  });
+
+  dias.forEach((g,i) => {
+    const media = i >= 6 ? dias.slice(i-6,i+1).reduce((a,b)=>a+b,0)/7 : null;
+    s += `<rect class="hit" x="${(padL+i*bw).toFixed(1)}" y="${padT}" width="${bw.toFixed(1)}" height="${ih}" tabindex="0"`
+      + ` aria-label="${DATAS[i]}: investido ${brl(g)}"`
+      + ` data-d="${DATAS[i]}" data-g="${brl(g)}" data-m="${media != null ? brl(media) : "—"}" data-i="${i}"/>`;
+  });
+
+  return s + `</svg>`;
+}
+
+function ligarTooltips(){
+  document.querySelectorAll(".spark-wrap").forEach(wrap => {
+    const svg = wrap.querySelector("svg.spark");
+    const tip = wrap.querySelector(".tip");
+    if (!svg || !tip) return;
+    const barras = svg.querySelectorAll(".bar");
+    const limpa = () => { tip.hidden = true; barras.forEach(b => b.classList.remove("ativa")); };
+
+    svg.querySelectorAll(".hit").forEach(hit => {
+      const mostra = () => {
+        const d = hit.dataset;
+        tip.innerHTML = `<b>${d.d}</b><span>Investido <em>${d.g}</em></span><span>Média 7d <em>${d.m}</em></span>`;
+        tip.hidden = false;
+        barras.forEach(b => b.classList.toggle("ativa", b.dataset.i === d.i));
+        const hb = hit.getBoundingClientRect(), wb = wrap.getBoundingClientRect();
+        const larg = tip.offsetWidth;
+        tip.style.left = Math.max(10, Math.min(hb.left - wb.left + hb.width/2 - larg/2, wb.width - larg - 10)) + "px";
+        tip.style.top = (hb.top - wb.top + hb.height * 0.45) + "px";
+      };
+      hit.addEventListener("pointerenter", mostra);
+      hit.addEventListener("pointerdown", mostra);
+      hit.addEventListener("focus", mostra);
+      hit.addEventListener("blur", limpa);
+    });
+    wrap.addEventListener("pointerleave", limpa);
+  });
+}
+
+const OBJETIVOS = {
+  OUTCOME_SALES:"Vendas", OUTCOME_LEADS:"Leads", OUTCOME_ENGAGEMENT:"Engajamento",
+  OUTCOME_AWARENESS:"Alcance", OUTCOME_TRAFFIC:"Tráfego", LINK_CLICKS:"Cliques",
+  OUTCOME_APP_PROMOTION:"App", CONVERSIONS:"Conversões"
+};
+
+function linhaCampanha(k, unidadeConta){
+  const obj = OBJETIVOS[k.objetivo] || k.objetivo || "—";
+  if (k.encerrada){
+    return `<tr class="parada"><td><span class="camp-nome">${k.nome}</span><span class="camp-obj">${obj} · encerrada</span></td>`
+      + `<td>—</td><td>—</td><td>—</td><td>—</td><td>${k.cpr_ant != null ? brl(k.cpr_ant) : "—"}</td></tr>`;
+  }
+  let variacao = `<span style="color:var(--muted);font-size:12px">sem base</span>`;
+  if (k.cpr_ant != null && k.cpr != null){
+    const d = ((Number(k.cpr) - Number(k.cpr_ant)) / Number(k.cpr_ant)) * 100;
+    const nv = nivel(d);
+    variacao = `<span class="delta ${nv === "neutro" ? "" : nv}">${pct(d)}</span>`;
+  }
+  const orc = k.orcamento ? ` · teto ${brl0(k.orcamento)}/dia` : "";
+  return `<tr><td><span class="camp-nome">${k.nome}</span><span class="camp-obj">${obj}${orc}</span></td>`
+    + `<td>${brl(k.gasto)}</td><td>${num(k.res)}</td>`
+    + `<td>${k.cpr != null ? brl(k.cpr) : "sem resultado"}<span class="cell-un">${unidadeConta}</span></td>`
+    + `<td>${k.ctr != null ? Number(k.ctr).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}) + "%" : "—"}</td>`
+    + `<td>${variacao}</td></tr>`;
+}
+
+function renderHoje(){
+  const box = document.getElementById("hoje");
+  const lista = HOJE && Array.isArray(HOJE.contas) ? HOJE.contas : [];
+  const comDado = lista.filter(x => Number(x.gasto) > 0);
+
+  if (!comDado.length){
+    box.innerHTML = `<div class="hoje-box"><div class="hoje-vazio">
+      <div class="t">Nenhuma conta entregou hoje ainda</div>
+      <div class="d">As leituras do dia acontecem às 13h e às 18h, e o botão acima força uma agora.</div>
+    </div></div>`;
+    return;
+  }
+
+  const gastoTotal = lista.reduce((s,x) => s + Number(x.gasto || 0), 0);
+  const resTotal = lista.reduce((s,x) => s + Number(x.res || 0), 0);
+  const zeradas = lista.length - comDado.length;
+
+  if (HOJE.atualizado){
+    const q = new Date(HOJE.atualizado);
+    if (!isNaN(q)) document.getElementById("hojeQuando").textContent =
+      "lido às " + q.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) + " · parcial";
+  }
+
+  box.innerHTML = `<div class="hoje-box">
+    <div class="hoje-topo">
+      <div><span class="k">Investido hoje</span><span class="v">${brl(gastoTotal)}</span></div>
+      <div><span class="k">Resultados</span><span class="v">${num(resTotal)}</span></div>
+      <div><span class="k">Sem entrega</span><span class="v">${zeradas} de ${lista.length}</span></div>
+    </div>
+    <div class="hoje-grid">
+      ${lista.map(x => `<div class="hoje-cel ${Number(x.gasto) ? "" : "zerada"}">
+        <span class="n">${x.nome}</span>
+        <span class="g">${brl(x.gasto || 0)}</span>
+        <span class="r">${Number(x.gasto)
+          ? `${num(x.res)} ${x.rotuloRes}${x.cpr != null ? " · " + x.unidade + " " + brl(x.cpr) : ""}`
+          : `<span class="marca">não entregou hoje</span>`}</span>
+      </div>`).join("")}
+    </div>
+  </div>`;
+}
+
+function render(){
+  const calc = CONTAS.map(c => ({c, m:calcula(c)}));
+  calc.sort((a,b) => ordem[a.m.nivel] - ordem[b.m.nivel] || b.m.inv7 - a.m.inv7);
+
+  document.getElementById("periodo").textContent = `${JANELA.inicio} a ${JANELA.fim}`;
+  document.getElementById("tInv7").textContent = brl(calc.reduce((s,x) => s + x.m.inv7, 0));
+  document.getElementById("tInvDia").textContent = brl(calc.reduce((s,x) => s + x.m.invDia, 0));
+  document.getElementById("tAlerta").textContent = calc.filter(x => x.m.nivel === "crit" || x.m.nivel === "warn").length + " de " + calc.length;
+  document.getElementById("tEscala").textContent = calc.filter(x => x.m.nivel === "ok").length;
+  document.getElementById("contagem").textContent = `Meta Ads · ${calc.length} contas`;
+
+  document.getElementById("grade").innerHTML = calc.map(({c,m}) => {
+    const cls = m.nivel === "neutro" ? "" : m.nivel;
+    return `<div class="card ${cls}">
+      <div class="nome">${c.nome}</div>
+      <div class="bloco-cpr">
+        <span class="un">${c.unidade}</span>
+        <span class="cpr">${m.cprAtual != null ? brl(m.cprAtual) : "sem resultado"}</span>
+        <span class="conv">${c.conversao}</span>
+      </div>
+      <div class="linha"><span class="k">Semana anterior</span><span class="v">${m.cprAnt != null ? brl(m.cprAnt) : "—"}</span></div>
+      <div class="linha"><span class="k">Variação</span><span class="v">${m.delta != null ? `<span class="delta ${cls}">${pct(m.delta)}</span>` : "sem base"}</span></div>
+      <div class="linha"><span class="k">Investido 7d</span><span class="v">${brl(m.inv7)}</span></div>
+      <div class="linha"><span class="k">${c.rotuloRes}</span><span class="v">${num(m.resAtual)}</span></div>
+    </div>`;
+  }).join("");
+
+  const problemas = CONTAS.map(c => {
+    const e = ESTADOS[c.status] || {g:"risco", txt:`estado "${c.status}" não reconhecido`};
+    if (e.g !== "ok") return {nome:c.nome, grav:e.g, motivo:e.txt};
+    if (c.pagamento === false) return {nome:c.nome, grav:"risco", motivo:"sem forma de pagamento cadastrada"};
+    return null;
+  }).filter(Boolean);
+
+  const parados = problemas.filter(p => p.grav === "parado");
+  const emRisco = problemas.filter(p => p.grav === "risco");
+  const box = document.getElementById("cobranca");
+
+  if (parados.length){
+    box.innerHTML = `<div class="billing parado"><span class="sinal"></span><div class="corpo">
+      <div class="t">${parados.length === 1 ? "1 conta parou de rodar por cobrança" : parados.length + " contas pararam de rodar por cobrança"}</div>
+      <ul>${parados.concat(emRisco).map(p => `<li><b>${p.nome}</b> — ${p.motivo}</li>`).join("")}</ul>
+      <div class="d">Enquanto a pendência não for resolvida no gerenciador, nenhuma otimização nessas contas tem efeito.</div>
+    </div></div>`;
+  } else if (emRisco.length){
+    box.innerHTML = `<div class="billing risco"><span class="sinal"></span><div class="corpo">
+      <div class="t">${emRisco.length === 1 ? "1 conta com pendência de cobrança" : emRisco.length + " contas com pendência de cobrança"}</div>
+      <ul>${emRisco.map(p => `<li><b>${p.nome}</b> — ${p.motivo}</li>`).join("")}</ul>
+      <div class="d">Ainda entregando, mas resolver antes que o Meta suspenda.</div>
+    </div></div>`;
+  } else {
+    box.innerHTML = `<div class="billing"><span class="sinal"></span><div class="corpo">
+      <div class="t">Todas as ${CONTAS.length} contas rodando</div>
+      <div class="d">Nenhuma suspensão por fatura em aberto, cartão recusado ou falta de forma de pagamento.</div>
+    </div></div>`;
+  }
+
+  const alertas = [];
+  calc.forEach(({c,m}) => {
+    const un = c.unidade.toLowerCase();
+    if (m.nivel === "crit")
+      alertas.push({n:"crit", t:`${c.nome}: ${un} ${pct(m.delta)} contra a semana passada`,
+        d:`${brl(m.cprAtual)} agora, contra ${brl(m.cprAnt)} na semana anterior, com ${brl(m.inv7)} investidos.`});
+    if (m.nivel === "warn")
+      alertas.push({n:"warn", t:`${c.nome}: ${un} ${pct(m.delta)} contra a semana passada`,
+        d:`${brl(m.cprAtual)} agora, contra ${brl(m.cprAnt)} na semana anterior.`});
+    if (m.nivel === "ok")
+      alertas.push({n:"ok", t:`${c.nome}: ${un} ${pct(m.delta)} contra a semana passada`,
+        d:`${brl(m.cprAtual)} agora, contra ${brl(m.cprAnt)} na semana anterior. Candidata a aumento de orçamento.`});
+    if (m.cprAtual == null && m.gastoAtual > 0)
+      alertas.push({n:"crit", t:`${c.nome}: ${brl(m.gastoAtual)} investidos sem nenhum resultado`,
+        d:`Nenhum ${c.rotuloRes.replace(/s$/,"")} registrado na semana. Vale checar o pixel e o evento de conversão antes de mexer na campanha.`});
+    if (m.invDia === 0 && m.baseDia > 0)
+      alertas.push({n:"crit", t:`${c.nome}: não entregou nada no último dia fechado`,
+        d:`A conta vinha de uma média de ${brl(m.baseDia)} por dia e ficou em zero em ${JANELA.fim}.`});
+    else if (m.quedaEntrega != null && m.quedaEntrega < -70 && m.invDia > 0)
+      alertas.push({n:"warn", t:`${c.nome}: entrega caiu ${pct(m.quedaEntrega)} no último dia`,
+        d:`${brl(m.invDia)} contra média diária de ${brl(m.baseDia)} na semana.`});
+  });
+  alertas.sort((a,b) => ordem[a.n] - ordem[b.n]);
+
+  document.getElementById("alertas").innerHTML = alertas.map(a => `
+    <div class="alerta ${a.n}">
+      <span class="pill ${a.n}">${a.n === "crit" ? "Agir" : a.n === "warn" ? "Observar" : "Escalar"}</span>
+      <div class="txt"><div class="t">${a.t}</div><div class="d">${a.d}</div></div>
+    </div>`).join("");
+
+  document.getElementById("contas").innerHTML = calc.map(({c,m}) => `
+    <div class="conta">
+      <div class="conta-head">
+        <div>
+          <h3>${c.nome}</h3>
+          <div class="meta">${c.id} · ${c.conversao}</div>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><span class="k">Investido 7d</span><span class="v">${brl(m.inv7)}</span></div>
+          <div class="kpi"><span class="k">${c.rotuloRes}</span><span class="v">${num(m.resAtual)}</span></div>
+          <div class="kpi"><span class="k">${c.unidade}</span><span class="v">${m.cprAtual != null ? brl(m.cprAtual) : "—"}</span></div>
+        </div>
+      </div>
+      <div class="spark-wrap">
+        <div class="spark-label">
+          <span class="t">Investimento diário · ${c.dias.length} dias</span>
+          <span class="r">linha tracejada = média de 7 dias</span>
+        </div>
+        ${sparkline(c)}
+        <div class="tip" hidden></div>
+      </div>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr><th>Campanha</th><th>Investido 7d</th><th>Result.</th><th>Custo/result.</th><th>CTR</th><th>vs. semana ant.</th></tr></thead>
+          <tbody>${c.campanhas.map(k => linhaCampanha(k, c.unidade)).join("")}</tbody>
+        </table>
+      </div>
+    </div>`).join("");
+
+  ligarTooltips();
+}
+
+function aviso(texto, tipo){
+  const el = document.getElementById("statusCarga");
+  el.textContent = texto;
+  el.className = "carga" + (tipo ? " " + tipo : "");
+}
+
+function carregar(){ rpc("painel").then(aplicar).catch(function(){ aviso("Nao foi possivel carregar os dados agora.","erro"); }); }
+function aplicar(d){
+  if (!d || !Array.isArray(d.contas) || !d.contas.length){
+    aviso("Os dados ainda não chegaram. Use o botão para forçar uma leitura.", "erro");
+    return;
+  }
+  CONTAS = d.contas;
+  DATAS = d.datas || [];
+  HOJE = d.hoje || null;
+  JANELA = {inicio: d.inicio, fim: d.fim};
+  render();
+  renderHoje();
+  const g = d.gerado_em ? new Date(d.gerado_em) : null;
+  aviso(g && !isNaN(g) ? "Dados de " + g.toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"}) : "");
+}
+
+async function atualizar(){
+  const btn = document.getElementById("btnAtualizar");
+  const antes = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Buscando no Meta…";
+  aviso("Lendo as contas no Meta. Leva uns 20 segundos.");
+  try {
+    const r = await rpc("atualizar_agora");
+    const j = await r.json();
+    if (j && j.ok === false){
+      aviso(`Os dados já foram atualizados há pouco. Tente de novo em ${j.espere}s.`, "erro");
+      btn.disabled = false; btn.textContent = antes;
+      return;
+    }
+    aviso("Leitura disparada. Recarregando em instantes…");
+    setTimeout(() => location.reload(), 22000);
+  } catch (e) {
+    aviso("A atualização falhou. Os números na tela continuam valendo.", "erro");
+    btn.disabled = false;
+    btn.textContent = antes;
+  }
+}
+
+document.getElementById("btnAtualizar").addEventListener("click", atualizar);
+carregar();
+</script>
+
+</body></html>
