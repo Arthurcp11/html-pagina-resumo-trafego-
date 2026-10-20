@@ -302,8 +302,20 @@ const ESTADOS = {
   ACTIVE:             {g:"ok",     txt:"ativa"}
 };
 
-const brl  = v => v == null ? "—" : "R$ " + Number(v).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
-const brl0 = v => v == null ? "—" : "R$ " + Number(v).toLocaleString("pt-BR",{minimumFractionDigits:0,maximumFractionDigits:0});
+// Cada conta tem a sua moeda. Valores de moedas diferentes nunca são somados:
+// o topo mostra um total por moeda, lado a lado.
+const SIMB = {BRL:"R$", USD:"US$", EUR:"€"};
+const sim  = m => SIMB[m] || "R$";
+const brl  = (v,m) => v == null ? "—" : sim(m) + " " + Number(v).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+const brl0 = (v,m) => v == null ? "—" : sim(m) + " " + Number(v).toLocaleString("pt-BR",{minimumFractionDigits:0,maximumFractionDigits:0});
+
+// Soma [{moeda, valor}] agrupando por moeda e devolve "R$ x · US$ y".
+function totalPorMoeda(itens){
+  const por = {};
+  itens.forEach(i => { const m = i.moeda || "BRL"; por[m] = (por[m] || 0) + Number(i.valor || 0); });
+  const chaves = Object.keys(por).sort((a,b) => (a === "BRL" ? -1 : b === "BRL" ? 1 : a.localeCompare(b)));
+  return chaves.length ? chaves.map(m => brl(por[m], m)).join(" · ") : "—";
+}
 const pct  = v => (v > 0 ? "+" : "") + v.toLocaleString("pt-BR",{maximumFractionDigits:0}) + "%";
 const num  = v => Number(v || 0).toLocaleString("pt-BR");
 
@@ -319,15 +331,32 @@ const ordem = {crit:0, warn:1, neutro:2, ok:3};
 function calcula(c){
   const ga = Number(c.atual.gasto), ra = Number(c.atual.res);
   const gb = Number(c.ant.gasto),   rb = Number(c.ant.res);
-  const cprAtual = ra > 0 ? ga / ra : null;
-  const cprAnt   = rb > 0 ? gb / rb : null;
+  const kf = Number(c.fator) || 1;
+  const cprAtual = ra > 0 ? (ga * kf) / ra : null;
+  const cprAnt   = rb > 0 ? (gb * kf) / rb : null;
   const delta = (cprAtual != null && cprAnt != null) ? ((cprAtual - cprAnt) / cprAnt) * 100 : null;
   const dias = c.dias.map(Number);
   const inv7 = dias.slice(-7).reduce((s,v) => s + v, 0);
   const invDia = dias[dias.length - 1] ?? 0;
   const baseDia = dias.slice(-8,-1).reduce((s,v) => s + v, 0) / 7;
   const quedaEntrega = baseDia > 0 ? ((invDia - baseDia) / baseDia) * 100 : null;
-  return {cprAtual, cprAnt, delta, nivel:nivel(delta), inv7, invDia, baseDia, quedaEntrega, gastoAtual:ga, resAtual:ra};
+
+  // Uma linha por família de resultado: leads e vendas rodando juntas viram
+  // dois resumos, cada um com o seu custo e a sua variação.
+  const fams = (c.resumos || []).map(f => {
+    const fa = Number(f.gasto),    fr = Number(f.res);
+    const fb = Number(f.gastoAnt), frb = Number(f.resAnt);
+    // fator = 1 normalmente; 1000 em CPM, onde o custo é por mil.
+    const k  = Number(f.fator) || 1;
+    const ca = fr > 0 ? (fa * k) / fr : null;
+    const cb = frb > 0 ? (fb * k) / frb : null;
+    const d  = (ca != null && cb != null) ? ((ca - cb) / cb) * 100 : null;
+    return {rotulo:f.rotulo, unidade:f.unidade || "", gasto:fa, res:fr,
+            cprAtual:ca, cprAnt:cb, delta:d, nivel:nivel(d)};
+  });
+
+  return {cprAtual, cprAnt, delta, nivel:nivel(delta), inv7, invDia, baseDia,
+          quedaEntrega, gastoAtual:ga, resAtual:ra, fams};
 }
 
 // Barras de investimento diário com a média móvel de 7 dias por cima.
@@ -344,7 +373,7 @@ function sparkline(c){
   for (let i = 0; i <= 2; i++){
     const y = padT + ih - (ih * i / 2);
     s += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
-    s += `<text x="${padL-7}" y="${y+4}" text-anchor="end" font-size="10" font-family="var(--font-mono)" fill="var(--muted)">${brl0(maxG*i/2)}</text>`;
+    s += `<text x="${padL-7}" y="${y+4}" text-anchor="end" font-size="10" font-family="var(--font-mono)" fill="var(--muted)">${brl0(maxG*i/2, c.moeda)}</text>`;
   }
 
   dias.forEach((g,i) => {
@@ -371,8 +400,8 @@ function sparkline(c){
   dias.forEach((g,i) => {
     const media = i >= 6 ? dias.slice(i-6,i+1).reduce((a,b)=>a+b,0)/7 : null;
     s += `<rect class="hit" x="${(padL+i*bw).toFixed(1)}" y="${padT}" width="${bw.toFixed(1)}" height="${ih}" tabindex="0"`
-      + ` aria-label="${DATAS[i]}: investido ${brl(g)}"`
-      + ` data-d="${DATAS[i]}" data-g="${brl(g)}" data-m="${media != null ? brl(media) : "—"}" data-i="${i}"/>`;
+      + ` aria-label="${DATAS[i]}: investido ${brl(g, c.moeda)}"`
+      + ` data-d="${DATAS[i]}" data-g="${brl(g, c.moeda)}" data-m="${media != null ? brl(media, c.moeda) : "—"}" data-i="${i}"/>`;
   });
 
   return s + `</svg>`;
@@ -412,11 +441,11 @@ const OBJETIVOS = {
   OUTCOME_APP_PROMOTION:"App", CONVERSIONS:"Conversões"
 };
 
-function linhaCampanha(k, unidadeConta){
+function linhaCampanha(k, unidadeConta, moeda){
   const obj = OBJETIVOS[k.objetivo] || k.objetivo || "—";
   if (k.encerrada){
     return `<tr class="parada"><td><span class="camp-nome">${k.nome}</span><span class="camp-obj">${obj} · encerrada</span></td>`
-      + `<td>—</td><td>—</td><td>—</td><td>—</td><td>${k.cpr_ant != null ? brl(k.cpr_ant) : "—"}</td></tr>`;
+      + `<td>—</td><td>—</td><td>—</td><td>—</td><td>${k.cpr_ant != null ? brl(k.cpr_ant, moeda) : "—"}</td></tr>`;
   }
   let variacao = `<span style="color:var(--muted);font-size:12px">sem base</span>`;
   if (k.cpr_ant != null && k.cpr != null){
@@ -424,10 +453,11 @@ function linhaCampanha(k, unidadeConta){
     const nv = nivel(d);
     variacao = `<span class="delta ${nv === "neutro" ? "" : nv}">${pct(d)}</span>`;
   }
-  const orc = k.orcamento ? ` · teto ${brl0(k.orcamento)}/dia` : "";
+  const orc = k.orcamento ? ` · teto ${brl0(k.orcamento, moeda)}/dia` : "";
   return `<tr><td><span class="camp-nome">${k.nome}</span><span class="camp-obj">${obj}${orc}</span></td>`
-    + `<td>${brl(k.gasto)}</td><td>${num(k.res)}</td>`
-    + `<td>${k.cpr != null ? brl(k.cpr) : "sem resultado"}<span class="cell-un">${unidadeConta}</span></td>`
+    + `<td>${brl(k.gasto, moeda)}</td>`
+    + `<td>${num(k.res)}<span class="cell-un">${k.rotulo || ""}</span></td>`
+    + `<td>${k.cpr != null ? brl(k.cpr, moeda) : "sem resultado"}<span class="cell-un">${k.unidade || unidadeConta}</span></td>`
     + `<td>${k.ctr != null ? Number(k.ctr).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}) + "%" : "—"}</td>`
     + `<td>${variacao}</td></tr>`;
 }
@@ -445,7 +475,7 @@ function renderHoje(){
     return;
   }
 
-  const gastoTotal = lista.reduce((s,x) => s + Number(x.gasto || 0), 0);
+  // gastoTotal deixou de existir: moedas diferentes não se somam.
   const resTotal = lista.reduce((s,x) => s + Number(x.res || 0), 0);
   const zeradas = lista.length - comDado.length;
 
@@ -457,17 +487,17 @@ function renderHoje(){
 
   box.innerHTML = `<div class="hoje-box">
     <div class="hoje-topo">
-      <div><span class="k">Investido hoje</span><span class="v">${brl(gastoTotal)}</span></div>
+      <div><span class="k">Investido hoje</span><span class="v">${totalPorMoeda(lista.map(x => ({moeda:x.moeda, valor:x.gasto})))}</span></div>
       <div><span class="k">Resultados</span><span class="v">${num(resTotal)}</span></div>
       <div><span class="k">Sem entrega</span><span class="v">${zeradas} de ${lista.length}</span></div>
     </div>
     <div class="hoje-grid">
       ${lista.map(x => `<div class="hoje-cel ${Number(x.gasto) ? "" : "zerada"}">
         <span class="n">${x.nome}</span>
-        <span class="g">${brl(x.gasto || 0)}</span>
+        <span class="g">${brl(x.gasto || 0, x.moeda)}</span>
         <span class="r">${!Number(x.gasto)
           ? `<span class="marca">não entregou hoje</span>`
-          : `${num(x.res)} ${x.rotuloRes}${x.cpr != null ? " · " + x.unidade + " " + brl(x.cpr) : ""}`}</span>
+          : `${num(x.res)} ${x.rotuloRes}${x.cpr != null ? " · " + x.unidade + " " + brl(x.cpr, x.moeda) : ""}`}</span>
         ${x.campanha ? `<span class="c">${x.campanha}${x.qtdCamp > 1 ? ` · +${x.qtdCamp - 1} rodando` : ""}</span>` : ""}
       </div>`).join("")}
     </div>
@@ -479,8 +509,10 @@ function render(){
   calc.sort((a,b) => ordem[a.m.nivel] - ordem[b.m.nivel] || b.m.inv7 - a.m.inv7);
 
   document.getElementById("periodo").textContent = `${JANELA.inicio} a ${JANELA.fim}`;
-  document.getElementById("tInv7").textContent = brl(calc.reduce((s,x) => s + x.m.inv7, 0));
-  document.getElementById("tInvDia").textContent = brl(calc.reduce((s,x) => s + x.m.invDia, 0));
+  document.getElementById("tInv7").textContent =
+    totalPorMoeda(calc.map(({c,m}) => ({moeda:c.moeda, valor:m.inv7})));
+  document.getElementById("tInvDia").textContent =
+    totalPorMoeda(calc.map(({c,m}) => ({moeda:c.moeda, valor:m.invDia})));
   document.getElementById("tAlerta").textContent = calc.filter(x => x.m.nivel === "crit" || x.m.nivel === "warn").length + " de " + calc.length;
   document.getElementById("tEscala").textContent = calc.filter(x => x.m.nivel === "ok").length;
   document.getElementById("contagem").textContent = `Meta Ads · ${calc.length} contas`;
@@ -491,12 +523,12 @@ function render(){
       <div class="nome">${c.nome}</div>
       <div class="bloco-cpr">
         <span class="un">${c.unidade}</span>
-        <span class="cpr">${m.cprAtual != null ? brl(m.cprAtual) : "sem resultado"}</span>
+        <span class="cpr">${m.cprAtual != null ? brl(m.cprAtual, c.moeda) : "sem resultado"}</span>
         <span class="conv">${c.conversao}</span>
       </div>
-      <div class="linha"><span class="k">Semana anterior</span><span class="v">${m.cprAnt != null ? brl(m.cprAnt) : "—"}</span></div>
+      <div class="linha"><span class="k">Semana anterior</span><span class="v">${m.cprAnt != null ? brl(m.cprAnt, c.moeda) : "—"}</span></div>
       <div class="linha"><span class="k">Variação</span><span class="v">${m.delta != null ? `<span class="delta ${cls}">${pct(m.delta)}</span>` : "sem base"}</span></div>
-      <div class="linha"><span class="k">Investido 7d</span><span class="v">${brl(m.inv7)}</span></div>
+      <div class="linha"><span class="k">Investido 7d</span><span class="v">${brl(m.inv7, c.moeda)}</span></div>
       <div class="linha"><span class="k">${c.rotuloRes}</span><span class="v">${num(m.resAtual)}</span></div>
     </div>`;
   }).join("");
@@ -533,25 +565,31 @@ function render(){
 
   const alertas = [];
   calc.forEach(({c,m}) => {
-    const un = c.unidade.toLowerCase();
-    if (m.nivel === "crit")
-      alertas.push({n:"crit", t:`${c.nome}: ${un} ${pct(m.delta)} contra a semana passada`,
-        d:`${brl(m.cprAtual)} agora, contra ${brl(m.cprAnt)} na semana anterior, com ${brl(m.inv7)} investidos.`});
-    if (m.nivel === "warn")
-      alertas.push({n:"warn", t:`${c.nome}: ${un} ${pct(m.delta)} contra a semana passada`,
-        d:`${brl(m.cprAtual)} agora, contra ${brl(m.cprAnt)} na semana anterior.`});
-    if (m.nivel === "ok")
-      alertas.push({n:"ok", t:`${c.nome}: ${un} ${pct(m.delta)} contra a semana passada`,
-        d:`${brl(m.cprAtual)} agora, contra ${brl(m.cprAnt)} na semana anterior. Candidata a aumento de orçamento.`});
-    if (m.cprAtual == null && m.gastoAtual > 0)
-      alertas.push({n:"crit", t:`${c.nome}: ${brl(m.gastoAtual)} investidos sem nenhum resultado`,
-        d:`Nenhum ${c.rotuloRes.replace(/s$/,"")} registrado na semana. Vale checar o pixel e o evento de conversão antes de mexer na campanha.`});
+    // Um alerta por família: a venda piorando não some porque o lead melhorou.
+    const varias = m.fams.length > 1;
+    m.fams.forEach(f => {
+      const quem = varias ? `${c.nome} · ${f.rotulo}` : c.nome;
+      const un = (f.unidade || "").toLowerCase();
+      const mo = c.moeda;
+      if (f.nivel === "crit")
+        alertas.push({n:"crit", t:`${quem}: ${un} ${pct(f.delta)} contra a semana passada`,
+          d:`${brl(f.cprAtual, mo)} agora, contra ${brl(f.cprAnt, mo)} na semana anterior, com ${brl(f.gasto, mo)} investidos.`});
+      if (f.nivel === "warn")
+        alertas.push({n:"warn", t:`${quem}: ${un} ${pct(f.delta)} contra a semana passada`,
+          d:`${brl(f.cprAtual, mo)} agora, contra ${brl(f.cprAnt, mo)} na semana anterior.`});
+      if (f.nivel === "ok")
+        alertas.push({n:"ok", t:`${quem}: ${un} ${pct(f.delta)} contra a semana passada`,
+          d:`${brl(f.cprAtual, mo)} agora, contra ${brl(f.cprAnt, mo)} na semana anterior. Candidata a aumento de orçamento.`});
+      if (f.cprAtual == null && f.gasto > 0)
+        alertas.push({n:"crit", t:`${quem}: ${brl(f.gasto, mo)} investidos sem nenhum resultado`,
+          d:`Nenhum ${f.rotulo.replace(/s$/,"")} registrado na semana. Vale checar o pixel e o evento de conversão antes de mexer na campanha.`});
+    });
     if (m.invDia === 0 && m.baseDia > 0)
       alertas.push({n:"crit", t:`${c.nome}: não entregou nada no último dia fechado`,
-        d:`A conta vinha de uma média de ${brl(m.baseDia)} por dia e ficou em zero em ${JANELA.fim}.`});
+        d:`A conta vinha de uma média de ${brl(m.baseDia, c.moeda)} por dia e ficou em zero em ${JANELA.fim}.`});
     else if (m.quedaEntrega != null && m.quedaEntrega < -70 && m.invDia > 0)
       alertas.push({n:"warn", t:`${c.nome}: entrega caiu ${pct(m.quedaEntrega)} no último dia`,
-        d:`${brl(m.invDia)} contra média diária de ${brl(m.baseDia)} na semana.`});
+        d:`${brl(m.invDia, c.moeda)} contra média diária de ${brl(m.baseDia, c.moeda)} na semana.`});
   });
   alertas.sort((a,b) => ordem[a.n] - ordem[b.n]);
 
@@ -566,12 +604,15 @@ function render(){
       <div class="conta-head">
         <div>
           <h3>${c.nome}</h3>
-          <div class="meta">${c.id} · ${c.conversao}</div>
+          <div class="meta">${c.id} · ${m.fams.length ? m.fams.map(f => f.rotulo).join(" + ") : c.conversao}</div>
         </div>
         <div class="kpis">
-          <div class="kpi"><span class="k">Investido 7d</span><span class="v">${brl(m.inv7)}</span></div>
-          <div class="kpi"><span class="k">${c.rotuloRes}</span><span class="v">${num(m.resAtual)}</span></div>
-          <div class="kpi"><span class="k">${c.unidade}</span><span class="v">${m.cprAtual != null ? brl(m.cprAtual) : "—"}</span></div>
+          <div class="kpi"><span class="k">Investido 7d</span><span class="v">${brl(m.inv7, c.moeda)}</span></div>
+          ${m.fams.length
+            ? m.fams.map(f => `
+              <div class="kpi"><span class="k">${f.rotulo}</span><span class="v">${num(f.res)}</span></div>
+              <div class="kpi"><span class="k">${f.unidade}</span><span class="v">${f.cprAtual != null ? brl(f.cprAtual, c.moeda) : "—"}</span></div>`).join("")
+            : `<div class="kpi"><span class="k">${c.rotuloRes}</span><span class="v">—</span></div>`}
         </div>
       </div>
       <div class="spark-wrap">
@@ -585,7 +626,7 @@ function render(){
       <div class="tbl-scroll">
         <table>
           <thead><tr><th>Campanha</th><th>Investido 7d</th><th>Result.</th><th>Custo/result.</th><th>CTR</th><th>vs. semana ant.</th></tr></thead>
-          <tbody>${c.campanhas.map(k => linhaCampanha(k, c.unidade)).join("")}</tbody>
+          <tbody>${c.campanhas.map(k => linhaCampanha(k, c.unidade, c.moeda)).join("")}</tbody>
         </table>
       </div>
     </div>`).join("");
